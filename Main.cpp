@@ -80,10 +80,27 @@ static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_D
 static std::string g_iniFileName = "";
 
 /// contains shader code to override ouput
-static thread_local std::vector<std::vector<uint8_t>> s_fixed_color;
+static thread_local std::vector<std::vector<uint8_t>> s_constant_color;
 
-/// contains cloned pipeline, used to replace the selected pipeline by the "fixed color" PS shader
+/// resource for injecting cb13
+reshade::api::pipeline_layout cb_inject_layout;
+resource cb_inject_ressource;
+#define CBSIZE 4
+uint64_t cb_inject_size = CBSIZE;
+float cb_inject_values[CBSIZE];
+
+
+/// contains cloned pipeline, used to replace the selected pipeline by the "constant color" PS shader
 std::unordered_map<uint64_t, reshade::api::pipeline> pipelineCloneMap;
+
+struct ClonedShader {
+	reshade::api::pipeline pipeline;
+	bool initialized = false;
+} colorPSShader;
+
+// GUI variable to pass to cb (or not)
+static int constant_color = false;
+static int draw_to_trace = 1;
 
 
 /// <summary>
@@ -193,27 +210,13 @@ static void onResetCommandList(command_list *commandList)
 
 static void onInitPipeline(device *device, pipeline_layout layout, uint32_t subobjectCount, const pipeline_subobject *subobjects, pipeline pipelineHandle)
 {
+	
+	bool isPixelShader = false;
+	
 	// logging infos
 	std::stringstream s;
 	s << "onInitPipeline, pipelineHandle: " << (void*)pipelineHandle.handle << ")";
-	reshade::log_message(reshade::log_level::info, s.str().c_str());
-
-	// read color shader if not done
-	if (s_fixed_color.size() == 0) {
-		// Shader code loaded here
-		wchar_t filename[] = COLOR_SHADER_NAME;
-		bool status = load_shader_code(s_fixed_color, filename);
-	}
-
-	// clone the pipeline to have a version with fixed color for PS
-	pipeline clonedPipeline = clone_pipeline(device, layout, subobjectCount, subobjects, pipelineHandle, s_fixed_color);
-	// if a cloned pipeline has been produced, store it into pipelineCloneMap
-	if (clonedPipeline.handle != pipelineHandle.handle) {
-		pipelineCloneMap.emplace(pipelineHandle.handle, clonedPipeline);
-		s << "onInitPipeline, pipeline : " << (void*)pipelineHandle.handle << ") cloned with ("
-		  << (void*)clonedPipeline.handle << ")";
-		reshade::log_message(reshade::log_level::info, s.str().c_str());
-	}
+	//reshade::log_message(reshade::log_level::info, s.str().c_str());
 
 	// shader has been created, we will now create a hash and store it with the handle we got.
 	for (uint32_t i = 0; i < subobjectCount; ++i)
@@ -225,6 +228,7 @@ static void onInitPipeline(device *device, pipeline_layout layout, uint32_t subo
 				break;
 			case pipeline_subobject_type::pixel_shader:
 				g_pixelShaderManager.addHashHandlePair(calculateShaderHash(subobjects[i].data), pipelineHandle.handle);
+				isPixelShader = true;
 				break;
 			case pipeline_subobject_type::compute_shader:
 				g_computeShaderManager.addHashHandlePair(calculateShaderHash(subobjects[i].data), pipelineHandle.handle);
@@ -232,8 +236,41 @@ static void onInitPipeline(device *device, pipeline_layout layout, uint32_t subo
 		}
 	}
 
-}
+	//create a new pipeline by cloning the first PS shader
+	if (isPixelShader) {
 
+		// read color shader if not done
+		if (s_constant_color.size() == 0) {
+			// Shader code loaded here
+			wchar_t filename[] = COLOR_SHADER_NAME;
+			bool status = load_shader_code(s_constant_color, filename);
+		}
+
+		// if not done, create a pipeline_layout to read a dedicated CB
+		// create descriptor for a constant buffer in DX mapping starting from 0
+		// cb to use is defined in "bind_pipeline" by create descriptor_table()
+		reshade::api::descriptor_range srv_range;
+		srv_range.dx_register_index = 0; // start at 0
+		srv_range.count = UINT32_MAX; // unbounded
+		srv_range.visibility = reshade::api::shader_stage::all;
+		srv_range.type = reshade::api::descriptor_type::constant_buffer;
+
+		// create pipeline_layout using the descriptor
+		const reshade::api::pipeline_layout_param params[1] = { srv_range };
+		// reshade::api::pipeline_layout customLayout;
+		device->create_pipeline_layout(1, params, &cb_inject_layout);
+
+		//create ressource for cb
+		device->create_resource(resource_desc(cb_inject_size, memory_heap::cpu_to_gpu, resource_usage::constant_buffer), nullptr, resource_usage::cpu_access, &cb_inject_ressource);
+
+		// if not done, clone the pipeline to have a new version with fixed color for PS
+		clone_pipeline(device, cb_inject_layout, subobjectCount, subobjects, pipelineHandle, s_constant_color, pipelineCloneMap);
+
+		/* s << "onInitPipeline, color pipeline : " << (void*)colorPSShader.pipeline.handle << ") cloned from ("
+			<< (void*)pipelineHandle.handle << ")";
+		reshade::log_message(reshade::log_level::info, s.str().c_str()); */
+	}
+}
 
 static void onDestroyPipeline(device *device, pipeline pipelineHandle)
 {
@@ -245,19 +282,16 @@ static void onDestroyPipeline(device *device, pipeline pipelineHandle)
 	s << "on_destroy_pipeline("
 		<< reinterpret_cast<void*>(pipelineHandle.handle)
 		<< ")";
-	reshade::log_message(reshade::log_level::info, s.str().c_str());
+	//reshade::log_message(reshade::log_level::info, s.str().c_str());
 
-	// suppress cloned pipeline and entries in pipelineCloneMap
+	// suppress cloned pipeline 
+	if (colorPSShader.initialized) {
+		device->destroy_pipeline(colorPSShader.pipeline);
+		colorPSShader.initialized = false;
 
-	auto pipelineClonePair = pipelineCloneMap.find(pipelineHandle.handle);
-	if (pipelineClonePair != pipelineCloneMap.end()) {
-		pipelineCloneMap.erase(pipelineHandle.handle);
-		device->destroy_pipeline(pipelineClonePair->second);
-		s << "suppress cloned pipeline entries";
+		s << "suppress cloned pipeline";
 		reshade::log_message(reshade::log_level::info, s.str().c_str());
 	}
-
-
 
 }
 
@@ -339,6 +373,43 @@ static bool on_create_pipeline(device *device, pipeline_layout, uint32_t subobje
 }
 /// End of example shader_dump_addon.cpp
 
+/// <summary>
+/// This function will return true if the command list specified has one or more shader hashes which are currently marked to be hidden. Otherwise false.
+/// </summary>
+/// <param name="commandList"></param>
+/// <returns>true if the draw call has to be blocked</returns>
+bool blockDrawCallForCommandList(command_list* commandList)
+{
+	if (nullptr == commandList)
+	{
+		return false;
+	}
+
+	const CommandListDataContainer& commandListData = commandList->get_private_data<CommandListDataContainer>();
+	uint32_t shaderHash = g_pixelShaderManager.getShaderHash(commandListData.activePixelShaderPipeline);
+	bool blockCall = g_pixelShaderManager.isBlockedShader(shaderHash);
+	for (auto& group : g_toggleGroups)
+	{
+		blockCall |= group.isBlockedPixelShader(shaderHash);
+	}
+	shaderHash = g_vertexShaderManager.getShaderHash(commandListData.activeVertexShaderPipeline);
+	blockCall |= g_vertexShaderManager.isBlockedShader(shaderHash);
+	for (auto& group : g_toggleGroups)
+	{
+		blockCall |= group.isBlockedVertexShader(shaderHash);
+	}
+	shaderHash = g_computeShaderManager.getShaderHash(commandListData.activeComputeShaderPipeline);
+	blockCall |= g_computeShaderManager.isBlockedShader(shaderHash);
+	for (auto& group : g_toggleGroups)
+	{
+		blockCall |= group.isBlockedComputeShader(shaderHash);
+	}
+	return blockCall;
+}
+
+
+
+
 static void onBindPipeline(command_list* commandList, pipeline_stage stages, pipeline pipelineHandle)
 {
 	
@@ -385,7 +456,7 @@ static void onBindPipeline(command_list* commandList, pipeline_stage stages, pip
 			commandListData.activeVertexShaderPipeline = handleHasVertexShaderAttached ? pipelineHandle.handle : commandListData.activeVertexShaderPipeline;
 			commandListData.activeComputeShaderPipeline = handleHasComputeShaderAttached ? pipelineHandle.handle : commandListData.activeComputeShaderPipeline;
 		}
-		if((stages & pipeline_stage::pixel_shader) == pipeline_stage::pixel_shader)
+		if ((stages & pipeline_stage::pixel_shader) == pipeline_stage::pixel_shader)
 		{
 			if(handleHasPixelShaderAttached)
 			{
@@ -421,19 +492,46 @@ static void onBindPipeline(command_list* commandList, pipeline_stage stages, pip
 				commandListData.activeComputeShaderPipeline = pipelineHandle.handle;
 			}
 		}
-	}
-	{
 
-	if (!s_do_capture)
-		return;
-	//TODO: add shader mapping
-	#ifndef NDEBUG
-		{	const std::shared_lock<std::shared_mutex> lock(s_mutex);
+		// replace the shader by the cloned one if it is in the blocked list and a PS and modify its parameter to include cb13
+		if (blockDrawCallForCommandList(commandList) && handleHasPixelShaderAttached && constant_color) 
+		{
+			std::stringstream s;
+			//clone pipeline
+			auto pipelineCloned = pipelineCloneMap.find(pipelineHandle.handle);
+			if (pipelineCloned != pipelineCloneMap.end()) {
 
-			assert(pipelineHandle.handle == 0 || s_pipelines.find(pipelineHandle.handle) != s_pipelines.end());
+				// inject cb13
+				// create descriptor for cb13 (pipeline layout defined previously in ceate_pipeline when pipeline has been cloned)
+				descriptor_table_update update;
+				update.binding = 13;
+				update.count = 1;
+				update.type = descriptor_type::constant_buffer;
+				update.descriptors = &cb_inject_ressource;
+				commandList->push_descriptors(shader_stage::pixel, cb_inject_layout, 2, update);
+				//push value
+				reshade::api::shader_stage stage = reshade::api::shader_stage::pixel;
+				commandList->push_constants(
+					stage, 
+					cb_inject_layout,
+					0,
+					0,
+					cb_inject_size,
+					cb_inject_values);
+
+				//replace pipeline by the clone
+				s << "pipeline Pixel replaced ("
+					<< reinterpret_cast<void*>(pipelineHandle.handle)
+					<< ")";
+
+				reshade::log_message(reshade::log_level::info, s.str().c_str());
+				auto newPipeline = pipelineCloned->second;
+				commandList->bind_pipeline(stages, newPipeline);
+			}
 		}
-	#endif
+	}
 
+	if (s_do_capture) {
 		std::stringstream s;
 		s << "bind_pipeline(" << to_string(stages)<< " : " << (void *)shaderHash << ", pipelineHandle: " << (void *)pipelineHandle.handle << ")";
 
@@ -442,39 +540,6 @@ static void onBindPipeline(command_list* commandList, pipeline_stage stages, pip
 }
 
 
-/// <summary>
-/// This function will return true if the command list specified has one or more shader hashes which are currently marked to be hidden. Otherwise false.
-/// </summary>
-/// <param name="commandList"></param>
-/// <returns>true if the draw call has to be blocked</returns>
-bool blockDrawCallForCommandList(command_list* commandList)
-{
-	if(nullptr==commandList)
-	{
-		return false;
-	}
-
-	const CommandListDataContainer &commandListData = commandList->get_private_data<CommandListDataContainer>();
-	uint32_t shaderHash = g_pixelShaderManager.getShaderHash(commandListData.activePixelShaderPipeline);
-	bool blockCall = g_pixelShaderManager.isBlockedShader(shaderHash);
-	for(auto& group : g_toggleGroups)
-	{
-		blockCall |= group.isBlockedPixelShader(shaderHash);
-	}
-	shaderHash = g_vertexShaderManager.getShaderHash(commandListData.activeVertexShaderPipeline);
-	blockCall |= g_vertexShaderManager.isBlockedShader(shaderHash);
-	for(auto& group : g_toggleGroups)
-	{
-		blockCall |= group.isBlockedVertexShader(shaderHash);
-	}
-	shaderHash = g_computeShaderManager.getShaderHash(commandListData.activeComputeShaderPipeline);
-	blockCall |= g_computeShaderManager.isBlockedShader(shaderHash);
-	for(auto& group : g_toggleGroups)
-	{
-		blockCall |= group.isBlockedComputeShader(shaderHash);
-	}
-	return blockCall;
-}
 
 
 static bool onDraw(command_list* commandList, uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex, uint32_t first_instance)
@@ -488,7 +553,10 @@ static bool onDraw(command_list* commandList, uint32_t vertex_count, uint32_t in
 		reshade::log_message(reshade::log_level::info, s.str().c_str());
 	}
 	// check if for this command list the active shader handles are part of the blocked set. If so, return true
-	return blockDrawCallForCommandList(commandList);
+	if (!constant_color) 
+		return blockDrawCallForCommandList(commandList);
+	else
+		return false;
 }
 
 
@@ -502,7 +570,10 @@ static bool onDrawIndexed(command_list* commandList, uint32_t index_count, uint3
 		reshade::log_message(reshade::log_level::info, s.str().c_str());
 	}
 	// same as onDraw
-	return blockDrawCallForCommandList(commandList);
+	if (!constant_color)
+		return blockDrawCallForCommandList(commandList);
+	else
+		return false;
 }
 
 
@@ -527,8 +598,8 @@ static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command
 			if (s_do_capture) 
 				s << "dispatch_indirect(" << (void *)buffer.handle << ", " << offset << ", " << draw_count << ", " << stride << ")";
 			// same as OnDraw
-			return blockDrawCallForCommandList(commandList);
-			break;
+			if (!constant_color)
+				return blockDrawCallForCommandList(commandList);
 		// the rest aren't blocked
 		case indirect_command::dispatch_mesh:
 			if (s_do_capture) 
@@ -707,6 +778,9 @@ static void onReshadePresent(effect_runtime* runtime)
 	{
 		g_computeShaderManager.toggleMarkOnHuntedShader();
 	}
+
+	//TODO map Gui variable with cb13
+	// cb_inject_values[0] = draw_to_trace;
 }
 
 
@@ -841,6 +915,21 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 		ImGui::PopItemWidth();
 	}
 	ImGui::Separator();
+
+	// GUI for shaderHunter options
+	if (ImGui::CollapsingHeader("Pixel shader toggling parameters", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		// choose if color or disabled
+		ImGui::RadioButton("Disable", &constant_color, 0); ImGui::SameLine();
+		ImGui::RadioButton("Color", &constant_color, 1);
+
+		// define the number of draw to differentiate
+		// ImGui::SliderInt("# of draws to differentiate", &draw_to_trace, 1, 5);
+		ImGui::SliderFloat("# of draws to differentiate", &cb_inject_values[0], 0.0f, 5.0f, "ratio = %.0f");
+	}
+
+	ImGui::Separator();
+
 
 	if(ImGui::CollapsingHeader("List of Toggle Groups", ImGuiTreeNodeFlags_DefaultOpen))
 	{
