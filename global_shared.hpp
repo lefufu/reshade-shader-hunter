@@ -26,6 +26,7 @@ struct __declspec(uuid("a2d72286-a857-4e4a-8ca1-ef42faf4e340")) global_shared
 	reshade::api::pipeline_layout saved_pipeline_layout;
 
 	// to be used in push_descriptors
+	reshade::api::device *saved_device;
 	reshade::api::descriptor_table_update CB_desc_table_update;
 	reshade::api::descriptor_table_update RV_desc_table_update;
 	reshade::api::resource resource_desc_CB;

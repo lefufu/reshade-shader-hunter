@@ -540,6 +540,7 @@ static void on_init_pipeline_layout(
 		// 
 		// store pipeline layout to re use it in "push descriptor"
 		shared_data.saved_pipeline_layout = layout;
+		shared_data.saved_device = device;
 
 		// generate data for constant_buffer or shader_resource_view
 		for (uint32_t paramIndex = 0; paramIndex < paramCount; ++paramIndex) {
@@ -554,7 +555,7 @@ static void on_init_pipeline_layout(
 				shared_data.CBIndex = paramIndex;
 
 				// create descriptor table to re use it in "push descriptor"
-				device->create_resource(resource_desc(CBSIZE, memory_heap::cpu_to_gpu, resource_usage::constant_buffer), nullptr, resource_usage::cpu_access, &shared_data.resource_desc_CB);
+				device->create_resource(resource_desc(CBSIZE * sizeof(float), memory_heap::cpu_to_gpu, resource_usage::constant_buffer), nullptr, resource_usage::cpu_access, &shared_data.resource_desc_CB);
 				shared_data.CB_desc_table_update.binding = CBINDEX;
 				shared_data.CB_desc_table_update.count = 1;
 				shared_data.CB_desc_table_update.type = descriptor_type::constant_buffer;
@@ -563,9 +564,12 @@ static void on_init_pipeline_layout(
 
 				// map the constant buffer to the resource
 				uint64_t offset = 0;
-				uint64_t size = -1;
-				void* mapped_ptr = &shared_data.cb_inject_values;
+				uint64_t size = CBSIZE;
+
+				void* mapped_ptr = nullptr;
 				bool status = device->map_buffer_region(shared_data.resource_desc_CB, offset, size, map_access::read_write, &mapped_ptr);
+				// copy the value needed for CB into the buffer region
+				memcpy(mapped_ptr, shared_data.cb_inject_values, CBSIZE*sizeof(float));
 
 				s << "*** shared_data.CB_desc_table_update intialized and map_buffer_region() called ***";
 				reshade::log_message(reshade::log_level::info, s.str().c_str());
@@ -976,6 +980,8 @@ static void onBindPipeline(command_list* commandList, pipeline_stage stages, pip
 			auto pipelineCloned = pipelineCloneMap.find(pipelineHandle.handle);
 			if (pipelineCloned != pipelineCloneMap.end()) {
 
+
+				/*
 				//push value for cb13
 				reshade::api::shader_stage stage = reshade::api::shader_stage::pixel;
 				commandList->push_descriptors(
@@ -983,20 +989,28 @@ static void onBindPipeline(command_list* commandList, pipeline_stage stages, pip
 					shared_data.saved_pipeline_layout,
 					shared_data.CBIndex,
 					shared_data.CB_desc_table_update);
+					*/
 
-				s << "push_descritpor() done, CBindex = "
+					
+				// map the constant buffer to the resource
+				uint64_t offset = 0;
+				uint64_t size = -1;
+				// void* mapped_ptr = &shared_data.cb_inject_values;
+				// bool status = shared_data.saved_device->map_buffer_region(shared_data.resource_desc_CB, offset, size, map_access::read_write, &mapped_ptr);
+				// commandList->push_descriptors(shader_stage::pixel, shared_data.saved_pipeline_layout, shared_data.CBIndex, shared_data.CB_desc_table_update);
+
+				s << "push_descriptor() done, CBindex = "
 					<< to_string(shared_data.CBIndex)
 					<< ")";
 
 				//replace pipeline by the clone
+				auto newPipeline = pipelineCloned->second;
+				commandList->bind_pipeline(stages, newPipeline);
 				s << "pipeline Pixel replaced ("
 					<< reinterpret_cast<void*>(pipelineHandle.handle)
 					<< ")";
 
 				reshade::log_message(reshade::log_level::info, s.str().c_str());
-
-				auto newPipeline = pipelineCloned->second;
-				commandList->bind_pipeline(stages, newPipeline);
 			}
 		}
 	}
