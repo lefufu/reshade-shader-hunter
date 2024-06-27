@@ -564,7 +564,7 @@ static void on_init_pipeline_layout(
 
 				// map the constant buffer to the resource
 				uint64_t offset = 0;
-				uint64_t size = CBSIZE;
+				uint64_t size = CBSIZE * sizeof(float);
 
 				void* mapped_ptr = nullptr;
 				bool status = device->map_buffer_region(shared_data.resource_desc_CB, offset, size, map_access::read_write, &mapped_ptr);
