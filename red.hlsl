@@ -6,7 +6,8 @@
 
 cbuffer cb13 : register(b13)
 {
-    float cb_inject_values[CBSIZE]: packoffset(c0);
+    float cb_inject_values0: packoffset(c0);
+    float cb_inject_values1 : packoffset(c1);
 }
 
 void main(
@@ -20,10 +21,14 @@ void main(
 
   o0.xyzw = float4(1, 0, 0, 1);
     
-  if (cb_inject_values[0] == 1) o0.xyzw = float4(0, 1, 0, 1);
-  if (cb_inject_values[0] == 2) o0.xyzw = float4(0, 0, 1, 1);
+    if (cb_inject_values0 == 0)
+        o0.xyzw = float4(1, 1, 1, 1);
+    else
+        o0.xyzw = float4(0, 0, 1, 1);
+    
+  /* if (cb_inject_values[0] == 2) o0.xyzw = float4(0, 0, 1, 1);
   if (cb_inject_values[0] == 3) o0.xyzw = float4(1, 1, 0, 1);
-  if (cb_inject_values[0] == 4) o0.xyzw = float4(1, 0, 1, 1);
+  if (cb_inject_values[0] == 4) o0.xyzw = float4(1, 0, 1, 1); */
 
   return;
 }
