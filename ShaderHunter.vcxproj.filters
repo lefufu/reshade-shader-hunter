@@ -45,6 +45,9 @@
     <ClInclude Include="ClonePipeline.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="global_shared.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="CDataFile.cpp">

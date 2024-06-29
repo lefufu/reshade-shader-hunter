@@ -48,7 +48,7 @@ static void clone_pipeline(
             << ") Layout : " << reinterpret_cast<void*>(layout.handle)
             << ", subobjects counts: " << (subobjectCount)
             << " )";
-        reshade::log_message(reshade::log_level::info, s.str().c_str());
+       // reshade::log_message(reshade::log_level::info, s.str().c_str());
 
         // clone subobjects
         reshade::api::pipeline_subobject* newSubobjects = new reshade::api::pipeline_subobject[subobjectCount];
@@ -88,7 +88,7 @@ static void clone_pipeline(
                     << ", object Number: " << std::to_string(i)
                     << ", pipeline: " << reinterpret_cast<void*>(pipeline.handle)
                     << ")";
-                reshade::log_message(reshade::log_level::info, s.str().c_str());
+                // reshade::log_message(reshade::log_level::info, s.str().c_str());
             }
 
         }
@@ -110,7 +110,7 @@ static void clone_pipeline(
                 << ", orig pipeline: " << reinterpret_cast<void*>(pipeline.handle)
                 << ", cloned pipeline: " << reinterpret_cast<void*>(pipelineClone.handle)
                 << ")";
-            reshade::log_message(reshade::log_level::info, s.str().c_str());
+            // reshade::log_message(reshade::log_level::info, s.str().c_str());
         }
         else
         {

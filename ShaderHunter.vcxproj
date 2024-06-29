@@ -156,6 +156,7 @@
     <ClInclude Include="ClonePipeline.h" />
     <ClInclude Include="crc32_hash.hpp" />
     <ClInclude Include="framework.h" />
+    <ClInclude Include="global_shared.hpp" />
     <ClInclude Include="KeyData.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="ShaderManager.h" />
