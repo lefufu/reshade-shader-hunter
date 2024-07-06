@@ -54,6 +54,7 @@
 #include "load_shader.cpp"
 #include "ClonePipeline.cpp"
 
+
 // #include "renodx_format.hpp"
 
 // using namespace reshade::api;
@@ -538,8 +539,8 @@ static void on_init_pipeline_layout(
 		// ********************************
 		// generate infos for CB injections
 		// 
-		// store pipeline layout to re use it in "push descriptor"
-		//if push_descriptor which is not working :-( ), otherwise a new pipeline_layout dedicated to 1 cb is created
+		// store pipeline layout to re use it in "push_descriptor"
+		// not done as push_descriptor is not working :-( ), so a new pipeline_layout dedicated to 1 cb is created
 		// shared_data.saved_pipeline_layout = layout;
 		shared_data.saved_device = device;
 
@@ -935,7 +936,7 @@ bool blockDrawCallForCommandList(command_list* commandList)
 
 
 
-static void onBindPipeline(command_list* commandList, pipeline_stage stages, pipeline pipelineHandle)
+static void on_bind_pipeline(command_list* commandList, pipeline_stage stages, pipeline pipelineHandle)
 {
 	
 	uint64_t shaderHash; 
@@ -1018,7 +1019,7 @@ static void onBindPipeline(command_list* commandList, pipeline_stage stages, pip
 			}
 		}
 
-		// replace the shader by the cloned one if it is in the blocked list and a PS and modify its parameter to include cb13
+		// inject a cb containing mod paramter and replace the shader by the cloned one if it is in the blocked list 
 		if (blockDrawCallForCommandList(commandList) && handleHasPixelShaderAttached && constant_color) 
 		{
 			std::stringstream s;
@@ -1043,11 +1044,7 @@ static void onBindPipeline(command_list* commandList, pipeline_stage stages, pip
 				s.clear();
 				*/
 
-				// push_constant() working !
-				shared_data.shaderInjection = malloc(CBSIZE*sizeof(float));
-				memcpy(shared_data.shaderInjection, shared_data.cb_inject_values, CBSIZE * sizeof(float));
-
-				/*
+				/* // push_constant() working !
 					stages	Shader stages that will use the updated constants.
 					layout	Pipeline layout that describes where the constants are located.
 					param	Layout parameter index of the constant range in the pipeline layout (root parameter index in D3D12) => should be 2 for DX11
@@ -1062,16 +1059,13 @@ static void onBindPipeline(command_list* commandList, pipeline_stage stages, pip
 					0,
 					0,
 					CBSIZE,
-					shared_data.shaderInjection
+					&shared_data.cb_inject_values
 				); 
-
-
 				s << "!!! push_constant !!!, layout =  " << reinterpret_cast<void*>(&shared_data.saved_pipeline_layout.handle) << ";";
 				reshade::log_message(reshade::log_level::info, s.str().c_str());
 				s.str("");
 				s.clear();
 				
-
 				//replace pipeline by the clone
 				auto newPipeline = pipelineCloned->second;
 				commandList->bind_pipeline(stages, newPipeline);
@@ -1097,7 +1091,7 @@ static void onBindPipeline(command_list* commandList, pipeline_stage stages, pip
 
 
 
-static bool onDraw(command_list* commandList, uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex, uint32_t first_instance)
+static bool on_draw(command_list* commandList, uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex, uint32_t first_instance)
 {
 	
 	if (s_do_capture)
@@ -1480,7 +1474,8 @@ static void displaySettings(reshade::api::effect_runtime* runtime)
 
 		// define the number of draw to differentiate
 		// ImGui::SliderInt("# of draws to differentiate", &draw_to_trace, 1, 5);
-		ImGui::SliderFloat("# of draws to differentiate", &cb_inject_values[0], 0.0f, 5.0f, "ratio = %.0f");
+		// ImGui::SliderFloat("# of draws to differentiate", &cb_inject_values[0], 0.0f, 5.0f, "ratio = %.0f");
+		ImGui::SliderFloat("# of draws to differentiate", &shared_data.cb_inject_values.colorFlag, 0.0f, 5.0f, "ratio = %.0f");
 	}
 
 	ImGui::Separator();
@@ -1665,8 +1660,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 			
 			//updated
 			reshade::register_event<reshade::addon_event::reshade_present>(onReshadePresent);
-			reshade::register_event<reshade::addon_event::bind_pipeline>(onBindPipeline);
-			reshade::register_event<reshade::addon_event::draw>(onDraw);
+			reshade::register_event<reshade::addon_event::bind_pipeline>(on_bind_pipeline);
+			reshade::register_event<reshade::addon_event::draw>(on_draw);
 			reshade::register_event<reshade::addon_event::draw_indexed>(onDrawIndexed);
 			reshade::register_event<reshade::addon_event::draw_or_dispatch_indirect>(onDrawOrDispatchIndirect);
 
@@ -1705,8 +1700,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		reshade::unregister_event<reshade::addon_event::destroy_pipeline>(onDestroyPipeline);
 		reshade::unregister_event<reshade::addon_event::init_pipeline>(onInitPipeline);
 		reshade::unregister_event<reshade::addon_event::reshade_overlay>(onReshadeOverlay);
-		reshade::unregister_event<reshade::addon_event::bind_pipeline>(onBindPipeline);
-		reshade::unregister_event<reshade::addon_event::draw>(onDraw);
+		reshade::unregister_event<reshade::addon_event::bind_pipeline>(on_bind_pipeline);
+		reshade::unregister_event<reshade::addon_event::draw>(on_draw);
 		reshade::unregister_event<reshade::addon_event::draw_indexed>(onDrawIndexed);
 		reshade::unregister_event<reshade::addon_event::draw_or_dispatch_indirect>(onDrawOrDispatchIndirect);
 		reshade::unregister_event<reshade::addon_event::init_command_list>(onInitCommandList);
