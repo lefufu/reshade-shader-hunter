@@ -30,9 +30,12 @@ struct __declspec(uuid("a2d72286-a857-4e4a-8ca1-ef42faf4e340")) global_shared
 	reshade::api::descriptor_table_update CB_desc_table_update;
 	reshade::api::descriptor_table_update RV_desc_table_update;
 	reshade::api::resource resource_desc_CB;
+	// reshade::api::buffer_range resource_desc_CB;
 	reshade::api::resource resource_desc_RV;
 
 	// to be tested :  contains shader code to override ouput
 	static std::vector<std::vector<uint8_t>> s_constant_color;
+
+	void* shaderInjection;
 
 } shared_data;

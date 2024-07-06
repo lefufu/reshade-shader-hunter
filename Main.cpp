@@ -539,7 +539,8 @@ static void on_init_pipeline_layout(
 		// generate infos for CB injections
 		// 
 		// store pipeline layout to re use it in "push descriptor"
-		shared_data.saved_pipeline_layout = layout;
+		//if push_descriptor which is not working :-( ), otherwise a new pipeline_layout dedicated to 1 cb is created
+		// shared_data.saved_pipeline_layout = layout;
 		shared_data.saved_device = device;
 
 		// generate data for constant_buffer or shader_resource_view
@@ -551,13 +552,12 @@ static void on_init_pipeline_layout(
 			s.clear();
 			if (param.push_descriptors.type == descriptor_type::constant_buffer)
 			{	
-				// store info for CB injection
+				// for push descriptor : store info for CB injection
 				shared_data.CBIndex = paramIndex;
-				
-				// create descriptor table to re use it in "push descriptor"
+
+				/* // create descriptor table to re use it in "push descriptor" - not working, keep in case of explanation given. Instead push_constant() is used
 				//this line make map_buffer_region() output at 0
 				//bool create_result = device->create_resource(resource_desc(CBSIZE * sizeof(float), memory_heap::cpu_to_gpu, resource_usage::constant_buffer), nullptr, resource_usage::cpu_access, &shared_data.resource_desc_CB);
-				
 				bool create_result = device->create_resource(resource_desc(CBSIZE * sizeof(float), memory_heap::cpu_to_gpu, resource_usage::cpu_access), nullptr, resource_usage::cpu_access, &shared_data.resource_desc_CB);
 				s << "!!! create_ressource=" << to_string(create_result);
 				reshade::log_message(reshade::log_level::info, s.str().c_str());
@@ -568,14 +568,14 @@ static void on_init_pipeline_layout(
 				shared_data.CB_desc_table_update.count = 1;
 				shared_data.CB_desc_table_update.type = descriptor_type::constant_buffer;
 				shared_data.CB_desc_table_update.descriptors = &shared_data.resource_desc_CB;
-				// shared_data.CB_desc_table_update.table = param.descriptor_table.ranges;
+				// ignored !!! shared_data.CB_desc_table_update.table = 
 
 				// map the constant buffer to the resource
 				uint64_t offset = 0;
 				uint64_t size = CBSIZE * sizeof(float);
 
 				//associate the desc_table_update with the mapping
-				/*
+				
 				subresource_data subres = {};
 				// bool map_result = device->map_buffer_region(test, 0, UINT64_MAX, map_access::write_only, &subres.data);
 				bool map_result = device->map_buffer_region(shared_data.resource_desc_CB, 0, UINT64_MAX, map_access::write_only, &subres.data);
@@ -584,26 +584,64 @@ static void on_init_pipeline_layout(
 				s.str("");
 				s.clear();
 
-				// try to write things in the buffer
-				auto mapped_data = static_cast<float*>(subres.data);
-				mapped_data[0] = 1.0;
-				mapped_data[1] = 1.0;
+				if (map_result)
+				{
+					// try to write things in the buffer
+					auto mapped_data = static_cast<float*>(subres.data);
+					mapped_data[0] = 1.0;
+					mapped_data[1] = 1.0;
 
-				device->unmap_buffer_region(shared_data.resource_desc_CB);
+					device->unmap_buffer_region(shared_data.resource_desc_CB);
 
-				s << "!!!  data written to buffer !!! ";
-				reshade::log_message(reshade::log_level::info, s.str().c_str());
+					s << "!!!  data written to buffer !!! ";
+					reshade::log_message(reshade::log_level::info, s.str().c_str());
+					s.str("");
+					s.clear();
+				}
+				else
+				{
+					s << "!!! mapping error !!! ";
+					reshade::log_message(reshade::log_level::info, s.str().c_str());
+					s.str("");
+					s.clear();
+				} */
+
+
+				// create a new pipeline_layout for just 1 constant buffer to be updated by push_constant(), cb number defined in CBINDEX
+				// pipeline_layout_param
+				// uint32_t 	binding 			OpenGL uniform buffer binding index. 
+				// uint32_t 	dx_register_index	D3D10/D3D11/D3D12 constant buffer register index. 
+				// uint32_t 	dx_register_space	D3D12 constant buffer register space. 
+				// uint32_t 	count				Number of constants in this range (in 32-bit values). 
+				// shader_stage visibility			Shader pipeline stages that can make use of the constants in this range. 
+
+				reshade::api::pipeline_layout_param newParams;
+				newParams.type = reshade::api::pipeline_layout_param_type::push_constants;
+				newParams.push_constants.binding = 0;
+				newParams.push_constants.count = 1;
+				newParams.push_constants.dx_register_index = CBINDEX;
+				newParams.push_constants.dx_register_space = 0;
+				newParams.push_constants.visibility = reshade::api::shader_stage::all;
+
+				auto result = device->create_pipeline_layout(1, &newParams, &shared_data.saved_pipeline_layout);
+
+				s << "!!! on_init_pipeline_layout("
+					<< "Creating D3D11 Layout "
+					<< reinterpret_cast<void*>(&shared_data.saved_pipeline_layout.handle)
+					<< ": " << result
+					<< " )";
+				reshade::log_message(reshade::log_level::warning, s.str().c_str());
 				s.str("");
-				s.clear(); */
-
+				s.clear();
+				// */
 			}
 			else if (param.push_descriptors.type == descriptor_type::shader_resource_view)
 			{
 				// store info Ressource View injection
 				shared_data.RVIndex = paramIndex;
-			}
+			} 
 
-		}
+		} 
 
 		// std::stringstream s;
 		s << "on_init_pipeline_layout++("
@@ -988,26 +1026,7 @@ static void onBindPipeline(command_list* commandList, pipeline_stage stages, pip
 			auto pipelineCloned = pipelineCloneMap.find(pipelineHandle.handle);
 			if (pipelineCloned != pipelineCloneMap.end()) {
 
-				subresource_data subres = {};
-				bool map_result = commandList->get_device()->map_buffer_region(shared_data.resource_desc_CB, 0, UINT64_MAX, map_access::write_only, &subres.data);
-				s << "!!! map_ressource=" << to_string(map_result);
-				reshade::log_message(reshade::log_level::info, s.str().c_str());
-				s.str("");
-				s.clear();
-
-				// try to write things in the buffer
-				auto mapped_data = static_cast<float*>(subres.data);
-				mapped_data[0] = 1.0;
-				mapped_data[1] = 1.0;
-
-				commandList->get_device()->unmap_buffer_region(shared_data.resource_desc_CB);
-
-				s << "!!!  data written to buffer !!! ";
-				reshade::log_message(reshade::log_level::info, s.str().c_str());
-				s.str("");
-				s.clear(); 
-
-
+				/* push_descriptors not working :-( 
 				//push value for cb13
 				reshade::api::shader_stage stage = reshade::api::shader_stage::pixel;
 				commandList->push_descriptors(
@@ -1022,7 +1041,37 @@ static void onBindPipeline(command_list* commandList, pipeline_stage stages, pip
 				reshade::log_message(reshade::log_level::info, s.str().c_str());
 				s.str("");
 				s.clear();
-			
+				*/
+
+				// push_constant() working !
+				shared_data.shaderInjection = malloc(CBSIZE*sizeof(float));
+				memcpy(shared_data.shaderInjection, shared_data.cb_inject_values, CBSIZE * sizeof(float));
+
+				/*
+					stages	Shader stages that will use the updated constants.
+					layout	Pipeline layout that describes where the constants are located.
+					param	Layout parameter index of the constant range in the pipeline layout (root parameter index in D3D12) => should be 2 for DX11
+					first	Start offset (in 32-bit values) to the first constant in the constant range to begin updating.
+					count	Number of 32-bit values to update.
+					values	Pointer to the first element of an array of 32-bit values to set the constants to. These can be floating-point, integer or boolean depending on what the shader is expecting.
+				*/
+
+				commandList->push_constants(
+					shader_stage::pixel,  
+					shared_data.saved_pipeline_layout,
+					0,
+					0,
+					CBSIZE,
+					shared_data.shaderInjection
+				); 
+
+
+				s << "!!! push_constant !!!, layout =  " << reinterpret_cast<void*>(&shared_data.saved_pipeline_layout.handle) << ";";
+				reshade::log_message(reshade::log_level::info, s.str().c_str());
+				s.str("");
+				s.clear();
+				
+
 				//replace pipeline by the clone
 				auto newPipeline = pipelineCloned->second;
 				commandList->bind_pipeline(stages, newPipeline);
